@@ -1,0 +1,52 @@
+name: publish
+
+# Publishes @y0usaf/pi-jev to npm on a GitHub release, using trusted publishing
+# (OIDC) — no NODE_AUTH_TOKEN, no secret in this repo.
+#
+# One-time setup on npmjs.com, before the first release:
+#   Package @y0usaf/pi-jev -> Settings -> Trusted Publisher -> GitHub Actions
+#     Organization or user: y0usaf
+#     Repository:           pi-jev
+#     Workflow filename:    publish.yml
+#     Environment:          (leave empty)
+#
+# Requirements this workflow satisfies for the npm CLI:
+#   - runs on a GitHub-hosted runner (not self-hosted)
+#   - id-token: write, so the job can mint the OIDC token
+#   - npm >= 11.5.1, which is what setup-node ships with current Node
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: Pack and verify without publishing
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Show what will be published
+        run: |
+          npm --version
+          npm pack --dry-run
+
+      - name: Publish
+        if: github.event_name == 'release' || inputs.dry-run == false
+        # No token: npm exchanges the OIDC token from this job for publish
+        # rights, and attaches provenance automatically.
+        run: npm publish --access public

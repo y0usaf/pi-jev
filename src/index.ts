@@ -28,6 +28,13 @@ import {
 	summarizeVerdict,
 	type GateVerdict,
 } from "./gate";
+import {
+	buildOutputState,
+	evaluateOutput,
+	OUTPUT_QUESTIONS,
+	outputKey,
+	type OutputVerdict,
+} from "./output";
 
 /**
  * pi-jev - TypeSafe Jev as a decision layer for pi.
@@ -37,7 +44,10 @@ import {
  *   1. Gate. Before a mutating tool runs, ask Jev whether the action is
  *      destructive, exfiltrating, or outside scope, plus how reversible it is.
  *      Shadow mode (default) reports. Enforce mode asks the user to confirm.
- *   2. jev_ask. A model-facing tool for decisions that should be typed and
+ *   2. Output judge. After a tool runs, ask whether its output carries a
+ *      secret and what kind of failure it reports. Never blocks; it appends a
+ *      line to the tool result the model reads.
+ *   3. jev_ask. A model-facing tool for decisions that should be typed and
  *      calibrated instead of written: classification, relevance, yes/no checks.
  *
  * Fails open. An API outage must never stop the agent from working, so every
@@ -46,6 +56,8 @@ import {
 
 const STATUS_KEY = "jev";
 const ERROR_NOTIFY_INTERVAL_MS = 60_000;
+/** Identical output is judged once per window, keyed by tool and output hash. */
+const OUTPUT_CACHE_SECONDS = 120;
 
 const QuestionParam = Type.Object({
 	id: Type.String({
@@ -93,12 +105,16 @@ export default function jevExtension(pi: ExtensionAPI): void {
 	let config: JevConfig = loaded.config;
 	rememberSecret(config.apiKey);
 
-	let enabled = config.gate.enabled;
+	let gateOn = config.gate.enabled;
+	let outputOn = config.output.enabled;
 	let mode = config.gate.mode;
 
 	const cache = new Map<string, { at: number; verdict: GateVerdict }>();
 	const inflight = new Map<string, Promise<GateVerdict | undefined>>();
+	const outputCache = new Map<string, { at: number; verdict: OutputVerdict }>();
+	const outputInflight = new Map<string, Promise<OutputVerdict | undefined>>();
 	let last: { tool: string; verdict: GateVerdict; at: number } | undefined;
+	let lastOutput: { tool: string; verdict: OutputVerdict; at: number } | undefined;
 	let lastErrorAt = 0;
 	let missingKeyWarned = false;
 
@@ -106,7 +122,8 @@ export default function jevExtension(pi: ExtensionAPI): void {
 		loaded = loadJevConfig(cwd);
 		config = loaded.config;
 		rememberSecret(config.apiKey);
-		enabled = config.gate.enabled;
+		gateOn = config.gate.enabled;
+		outputOn = config.output.enabled;
 		mode = config.gate.mode;
 	}
 
@@ -128,12 +145,12 @@ export default function jevExtension(pi: ExtensionAPI): void {
 		}
 		ctx.ui.setStatus(
 			STATUS_KEY,
-			`jev: ${enabled ? mode : "off"}`,
+			`jev: ${gateOn ? mode : "off"}${outputOn ? "" : " (out off)"}`,
 		);
 	});
 
 	pi.on("tool_call", async (event, ctx) => {
-		if (!enabled || !config.apiKey) return;
+		if (!gateOn || !config.apiKey) return;
 		if (!config.gate.tools.includes(event.toolName)) return;
 
 		const key = judgmentKey(event.toolName, event.input);
@@ -174,6 +191,99 @@ export default function jevExtension(pi: ExtensionAPI): void {
 		);
 		return allow ? undefined : { block: true, reason: `${reason} (declined)` };
 	});
+
+	pi.on("tool_result", async (event, ctx) => {
+		if (!outputOn || !config.apiKey) return;
+		if (!config.output.tools.includes(event.toolName)) return;
+		const text = contentText(event.content);
+		if (!text.trim()) return;
+
+		const verdict = await outputVerdictFor(
+			outputKey(event.toolName, text),
+			{
+				toolName: event.toolName,
+				input: event.input,
+				output: text,
+				isError: event.isError,
+			},
+			ctx,
+		);
+		if (!verdict?.notice) return;
+
+		lastOutput = { tool: event.toolName, verdict, at: Date.now() };
+		ctx.ui.setStatus(STATUS_KEY, `jev: ${verdict.kind} (${event.toolName})`);
+		if (verdict.kind === "leak") {
+			ctx.ui.notify(
+				`jev: ${event.toolName} output may carry a secret (${verdict.leaksSecret.toFixed(2)})`,
+				"warning",
+			);
+		}
+		// The model reads the tool result, so the notice rides with it.
+		return {
+			content: [
+				...event.content,
+				{ type: "text" as const, text: `[pi-jev] ${verdict.notice}` },
+			],
+		};
+	});
+
+	async function outputVerdictFor(
+		key: string,
+		event: { toolName: string; input: unknown; output: string; isError: boolean },
+		ctx: ExtensionContext,
+	): Promise<OutputVerdict | undefined> {
+		const cached = outputCache.get(key);
+		if (
+			cached &&
+			(Date.now() - cached.at) / 1000 <= OUTPUT_CACHE_SECONDS
+		) {
+			return cached.verdict;
+		}
+		const pending = outputInflight.get(key);
+		if (pending) return pending;
+
+		const promise = judgeOutput(event, ctx).finally(() =>
+			outputInflight.delete(key),
+		);
+		outputInflight.set(key, promise);
+		const verdict = await promise;
+		if (verdict) {
+			outputCache.set(key, { at: Date.now(), verdict });
+			if (outputCache.size > 64) outputCache.clear();
+		}
+		return verdict;
+	}
+
+	async function judgeOutput(
+		event: { toolName: string; input: unknown; output: string; isError: boolean },
+		ctx: ExtensionContext,
+	): Promise<OutputVerdict | undefined> {
+		const apiKey = config.apiKey;
+		if (!apiKey) return undefined;
+		try {
+			const response = await askJev({
+				state: buildOutputState({
+					cwd: ctx.cwd,
+					toolName: event.toolName,
+					input: event.input,
+					output: event.output,
+					isError: event.isError,
+					outputChars: config.output.outputChars,
+				}),
+				questions: OUTPUT_QUESTIONS,
+				apiKey,
+				model: config.model,
+				endpoint: config.endpoint,
+				timeoutMs: config.timeoutMs,
+				retries: config.retries,
+				signal: ctx.signal,
+			});
+			return evaluateOutput(response, config);
+		} catch (error) {
+			notifyError(ctx, error);
+			return undefined;
+		}
+	}
 
 	async function verdictFor(
 		key: string,
@@ -255,12 +365,15 @@ export default function jevExtension(pi: ExtensionAPI): void {
 	}
 
 	pi.registerCommand("jev", {
-		description: "TypeSafe Jev gate: status, mode, on/off, last verdict",
+		description:
+			"TypeSafe Jev: status, mode, on/off, last verdict, last judged output",
 		handler: async (args, ctx) => {
 			const [sub, value] = args.trim().toLowerCase().split(/\s+/);
 			if (sub === "on" || sub === "off") {
-				enabled = sub === "on";
-				ctx.ui.setStatus(STATUS_KEY, enabled ? `jev: ${mode}` : "jev: off");
+				const on = sub === "on";
+				gateOn = on;
+				outputOn = on;
+				ctx.ui.setStatus(STATUS_KEY, on ? `jev: ${mode}` : "jev: off");
 				ctx.ui.notify(`pi-jev: gate ${sub}`, "info");
 				return;
 			}
@@ -273,7 +386,10 @@ export default function jevExtension(pi: ExtensionAPI): void {
 					return;
 				}
 				mode = value;
-				ctx.ui.setStatus(STATUS_KEY, `jev: ${enabled ? mode : "off"}`);
+				ctx.ui.setStatus(
+					STATUS_KEY,
+					`jev: ${gateOn ? mode : "off"}${outputOn ? "" : " (out off)"}`,
+				);
 				ctx.ui.notify(
 					`pi-jev: ${mode}${mode === "shadow" ? " (reports, never blocks)" : " (asks before running flagged calls)"}`,
 					"info",
@@ -287,6 +403,17 @@ export default function jevExtension(pi: ExtensionAPI): void {
 				}
 				ctx.ui.notify(
 					`pi-jev: ${last.tool} - ${summarizeVerdict(last.verdict)} | ${describeAnswers({ model: last.verdict.model, answers: last.verdict.answers })}`,
+					"info",
+				);
+				return;
+			}
+			if (sub === "output") {
+				if (!lastOutput) {
+					ctx.ui.notify("pi-jev: no tool output judged yet", "info");
+					return;
+				}
+				ctx.ui.notify(
+					`pi-jev output: ${lastOutput.tool} - ${lastOutput.verdict.kind} | leak ${lastOutput.verdict.leaksSecret.toFixed(2)} | class ${lastOutput.verdict.failureClass ?? "none"} at ${lastOutput.verdict.classConfidence?.toFixed(2) ?? "n/a"}`,
 					"info",
 				);
 				return;
@@ -334,7 +461,7 @@ export default function jevExtension(pi: ExtensionAPI): void {
 					: "apiKey (inline)"
 				: `missing (${API_KEY_ENV})`;
 			ctx.ui.notify(
-				`pi-jev: ${enabled ? "on" : "off"}, mode ${mode}, model ${config.model}, key ${key}, judging ${config.gate.tools.join("/")}, cache ${cache.size}`,
+				`pi-jev: ${gateOn ? "on" : "off"}, out ${outputOn ? "on" : "off"}, mode ${mode}, model ${config.model}, key ${key}, judging ${config.gate.tools.join("/")}, out tools ${config.output.tools.join("/")}, cache ${cache.size}/${outputCache.size}`,
 				"info",
 			);
 		},
@@ -416,6 +543,19 @@ export default function jevExtension(pi: ExtensionAPI): void {
 			},
 		});
 	}
+}
+
+/** Text of a tool result, so the output judge sees what the model will see. */
+function contentText(content: unknown): string {
+	if (typeof content === "string") return content;
+	if (!Array.isArray(content)) return "";
+	const parts: string[] = [];
+	for (const block of content) {
+		if (typeof block !== "object" || block === null) continue;
+		const text = Reflect.get(block, "text");
+		if (typeof text === "string") parts.push(text);
+	}
+	return parts.join("\n");
 }
 
 interface QuestionParamValue {

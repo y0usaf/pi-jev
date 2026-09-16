@@ -56,6 +56,23 @@ export interface GateConfig {
 	blockWithoutUI: boolean;
 }
 
+/**
+ * The output judge runs after a tool finishes, so its questions are about text
+ * that exists: a credential echoed into the transcript, a failure to classify.
+ * It never blocks, so there is no mode and no confirmation.
+ */
+export interface OutputConfig {
+	enabled: boolean;
+	/** Tool names whose output is judged. Everything else passes through. */
+	tools: string[];
+	/** Elide output longer than this from the state sent to Jev. */
+	outputChars: number;
+	/** Noul probability at or above which output counts as carrying a secret. */
+	leakThreshold: number;
+	/** Minimum confidence on the failure class before advice is attached. */
+	minConfidence: number;
+}
+
 export interface JevConfig {
 	endpoint: string;
 	model: string;
@@ -66,6 +83,7 @@ export interface JevConfig {
 	/** Cap on the serialized state handed to Jev. */
 	maxStateChars: number;
 	gate: GateConfig;
+	output: OutputConfig;
 }
 
 export interface LoadedJevConfig {
@@ -78,8 +96,11 @@ interface ParsedGate extends Partial<Omit<GateConfig, "blockOn">> {
 	blockOn?: Partial<GateThresholds>;
 }
 
-interface ParsedConfigFile extends Partial<Omit<JevConfig, "gate">> {
+type ParsedOutput = Partial<OutputConfig>;
+
+interface ParsedConfigFile extends Partial<Omit<JevConfig, "gate" | "output">> {
 	gate?: ParsedGate;
+	output?: ParsedOutput;
 }
 
 export function defaultJevConfig(): JevConfig {
@@ -100,6 +121,13 @@ export function defaultJevConfig(): JevConfig {
 			blockOn: { destructive: 0.9, exfiltration: 0.7, beyondScope: 0.85, impact: 2.5 },
 			minConfidence: 0.5,
 			blockWithoutUI: false,
+		},
+		output: {
+			enabled: true,
+			tools: ["bash"],
+			outputChars: 2000,
+			leakThreshold: 0.9,
+			minConfidence: 0.6,
 		},
 	};
 }
@@ -127,6 +155,13 @@ export function loadJevConfig(cwd: string): LoadedJevConfig {
 				...project.gate?.blockOn,
 			},
 			tools: project.gate?.tools ?? global.gate?.tools ?? defaults.gate.tools,
+		},
+		output: {
+			...defaults.output,
+			...global.output,
+			...project.output,
+			tools:
+				project.output?.tools ?? global.output?.tools ?? defaults.output.tools,
 		},
 	};
 
@@ -217,13 +252,8 @@ function readConfigFile(path: string, warnings: string[]): ParsedConfigFile {
 		if (typeof enabled === "boolean") parsedGate.enabled = enabled;
 		const mode = Reflect.get(gate, "mode");
 		if (mode === "shadow" || mode === "enforce") parsedGate.mode = mode;
-		const tools = Reflect.get(gate, "tools");
-		if (Array.isArray(tools)) {
-			const names = tools.filter(
-				(value): value is string => typeof value === "string" && value.length > 0,
-			);
-			if (names.length > 0) parsedGate.tools = names;
-		}
+		const tools = asToolNames(Reflect.get(gate, "tools"));
+		if (tools) parsedGate.tools = tools;
 		const cacheSeconds = asNonNegativeInt(Reflect.get(gate, "cacheSeconds"));
 		if (cacheSeconds !== undefined) parsedGate.cacheSeconds = cacheSeconds;
 		const argumentChars = asPositiveInt(Reflect.get(gate, "argumentChars"));
@@ -253,7 +283,31 @@ function readConfigFile(path: string, warnings: string[]): ParsedConfigFile {
 		out.gate = parsedGate;
 	}
 
+	const output = Reflect.get(parsed, "output");
+	if (typeof output === "object" && output !== null) {
+		const parsedOutput: ParsedOutput = {};
+		const enabled = Reflect.get(output, "enabled");
+		if (typeof enabled === "boolean") parsedOutput.enabled = enabled;
+		const tools = asToolNames(Reflect.get(output, "tools"));
+		if (tools) parsedOutput.tools = tools;
+		const outputChars = asPositiveInt(Reflect.get(output, "outputChars"));
+		if (outputChars !== undefined) parsedOutput.outputChars = outputChars;
+		const leakThreshold = asRatio(Reflect.get(output, "leakThreshold"));
+		if (leakThreshold !== undefined) parsedOutput.leakThreshold = leakThreshold;
+		const minConfidence = asRatio(Reflect.get(output, "minConfidence"));
+		if (minConfidence !== undefined) parsedOutput.minConfidence = minConfidence;
+		out.output = parsedOutput;
+	}
+
 	return out;
+}
+
+function asToolNames(value: unknown): string[] | undefined {
+	if (!Array.isArray(value)) return undefined;
+	const names = value.filter(
+		(item): item is string => typeof item === "string" && item.length > 0,
+	);
+	return names.length > 0 ? names : undefined;
 }
 
 function asString(value: unknown): string | undefined {

@@ -1,7 +1,7 @@
 {
   "name": "@y0usaf/pi-jev",
-  "version": "0.1.0",
-  "description": "TypeSafe Jev as a decision layer for Pi: judges mutating tool calls before they run, and exposes jev_ask for typed calibrated answers instead of prose",
+  "version": "0.2.0",
+  "description": "TypeSafe Jev as a decision layer for Pi: judges mutating tool calls before they run, reads tool output for secrets and failure class after, and exposes jev_ask for typed calibrated answers instead of prose",
   "homepage": "https://github.com/y0usaf/pi-jev",
   "repository": {
     "type": "git",

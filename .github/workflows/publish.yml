@@ -13,7 +13,11 @@ name: publish
 # Requirements this workflow satisfies for the npm CLI:
 #   - runs on a GitHub-hosted runner (not self-hosted)
 #   - id-token: write, so the job can mint the OIDC token
-#   - npm >= 11.5.1, which is what setup-node ships with current Node
+#   - npm >= 11.5.1: Node 24 bundles npm 11.x; Node 22 bundles 10.x and fails
+#   - no `registry-url` on setup-node: that input writes an .npmrc pinning
+#     //registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN} and exports a
+#     placeholder for the variable, so npm authenticates with a dead token
+#     instead of exchanging the OIDC token, which is the 404 it used to hit
 
 on:
   release:
@@ -37,16 +41,18 @@ jobs:
 
       - uses: actions/setup-node@v5
         with:
-          node-version: 22
-          registry-url: https://registry.npmjs.org
+          node-version: 24
 
       - name: Show what will be published
         run: |
           npm --version
+          if [ -n "$NODE_AUTH_TOKEN" ]; then
+            echo "::warning::NODE_AUTH_TOKEN is set; a token overrides OIDC trusted publishing"
+          fi
           npm pack --dry-run
 
       - name: Publish
-        if: github.event_name == 'release' || inputs.dry-run == false
+        if: github.event_name == 'release' || inputs['dry-run'] == false
         # No token: npm exchanges the OIDC token from this job for publish
         # rights, and attaches provenance automatically.
         run: npm publish --access public

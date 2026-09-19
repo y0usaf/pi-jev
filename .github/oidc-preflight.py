@@ -70,8 +70,11 @@ def main() -> int:
         return 0
     print("registry said: " + json.dumps(payload, indent=2))
     print(
-        "::error::npm rejected the OIDC exchange; the trusted publisher for this "
-        "package is missing or does not match this repository/workflow"
+        "::error::npm rejected the OIDC exchange, so `npm publish` will fall back "
+        "to token auth and fail with ENEEDAUTH. A 'package not found' here means no "
+        "trusted publisher is configured for this package on npmjs.com, or the one "
+        "configured does not match this repository and workflow filename. See "
+        "PUBLISHING.md; adding it needs an interactive passkey on npmjs.com."
     )
     return 1
 

@@ -42,9 +42,11 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 24
+      # Same condition as Publish: diagnose the real publish path, but leave a
+      # dry-run dispatch usable before the trusted publisher exists.
       - name: Preflight - OIDC trusted-publishing check
-        run: |
-          python3 .github/oidc-preflight.py
+        if: github.event_name == 'release' || inputs['dry-run'] == false
+        run: python3 .github/oidc-preflight.py
 
       - name: Show what will be published
         run: |

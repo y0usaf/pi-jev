@@ -13,10 +13,14 @@ import json
 import os
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 AUDIENCE = "npm:registry.npmjs.org"
-EXCHANGE = "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange"
+# Mirrors lib/utils/oidc.js in the npm CLI: the GitHub OIDC token is presented
+# as the Authorization bearer to the per-package exchange endpoint.
+EXCHANGE = "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/{}"
+PACKAGE = "@y0usaf/pi-jev"
 
 
 def mint() -> str:
@@ -33,9 +37,15 @@ def mint() -> str:
 
 
 def exchange(oidc_token: str):
-    body = json.dumps({"token": oidc_token}).encode()
+    escaped = urllib.parse.quote(PACKAGE, safe="")
     req = urllib.request.Request(
-        EXCHANGE, data=body, headers={"Content-Type": "application/json"}
+        EXCHANGE.format(escaped),
+        data=b"",
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {oidc_token}",
+        },
+        method="POST",
     )
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:

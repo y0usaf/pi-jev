@@ -12,8 +12,8 @@
 
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
-import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
+import { basename, dirname, join } from "node:path";
+import * as host from "@earendil-works/pi-coding-agent";
 import {
 	DEFAULT_ENDPOINT,
 	DEFAULT_MODEL,
@@ -23,6 +23,16 @@ import {
 
 export const CONFIG_FILE = "pi-jev.json";
 export const API_KEY_ENV = "TYPESAFE_API_KEY";
+
+/**
+ * The host module's exports as plain data.
+ *
+ * The extension needs the host's config dir name, and the host does not export
+ * that name before 0.79.7: importing it there binds `undefined`, which reached
+ * `join` and killed the agent at startup. Reading it off this view keeps the
+ * lookup optional instead of a named import that a host may not have.
+ */
+const HOST_EXPORTS: Record<string, unknown> = { ...host };
 
 /** shadow reports but never blocks; enforce can block a tool call. */
 export type GateMode = "shadow" | "enforce";
@@ -132,14 +142,32 @@ export function defaultJevConfig(): JevConfig {
 	};
 }
 
+/**
+ * Name of the host's per-project config directory.
+ *
+ * The host's own export wins whenever it exists (every host from 0.79.7 on,
+ * and the only answer that stays exact when `PI_CODING_AGENT_DIR` moves the
+ * agent dir elsewhere). Hosts before that export no name at all, but they do
+ * export `getAgentDir()`, and they keep the agent dir inside the same config
+ * dir they read per project (`<config dir>/agent`) — so the name can be read
+ * off the host's own layout rather than restated here.
+ *
+ * Caveat for those older hosts: with the agent dir overridden to a path outside
+ * that layout, the parent directory is a user choice rather than the config dir
+ * name, and a project config file can be missed. No public host on that range
+ * reports the name, so this is the closest the extension can get there.
+ */
+export function configDirName(): string {
+	const exported = HOST_EXPORTS.CONFIG_DIR_NAME;
+	if (typeof exported === "string" && exported.length > 0) return exported;
+	return basename(dirname(host.getAgentDir()));
+}
+
 export function loadJevConfig(cwd: string): LoadedJevConfig {
 	const defaults = defaultJevConfig();
 	const warnings: string[] = [];
-	const global = readConfigFile(join(getAgentDir(), CONFIG_FILE), warnings);
-	const project = readConfigFile(
-		join(cwd, CONFIG_DIR_NAME, CONFIG_FILE),
-		warnings,
-	);
+	const global = readConfigFile(join(host.getAgentDir(), CONFIG_FILE), warnings);
+	const project = readConfigFile(join(cwd, configDirName(), CONFIG_FILE), warnings);
 
 	const config: JevConfig = {
 		...defaults,

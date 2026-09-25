@@ -180,7 +180,7 @@ async function postOnce(
 				false,
 			);
 		}
-		return normalizeResponse(parsed);
+		return normalizeResponse(parsed, call.questions);
 	} finally {
 		clearTimeout(timer);
 	}
@@ -223,7 +223,16 @@ function validateQuestions(questions: Record<string, JevQuestion>): void {
 	}
 }
 
-function normalizeResponse(value: unknown): JevResponse {
+/**
+ * A response must answer every question it was asked, with the asked type.
+ * A missing answer is not a zero: callers that default absent probabilities to
+ * 0 would read it as "certainly not", so it fails here and reaches the same
+ * error path as a timeout or a 5xx.
+ */
+function normalizeResponse(
+	value: unknown,
+	questions: Record<string, JevQuestion>,
+): JevResponse {
 	if (typeof value !== "object" || value === null) {
 		throw new JevError("response was not an object");
 	}
@@ -234,6 +243,15 @@ function normalizeResponse(value: unknown): JevResponse {
 	for (const [id, answer] of Object.entries(answers)) {
 		if (!isJevAnswer(answer)) {
 			throw new JevError(`answer "${id}" has an unknown shape`);
+		}
+	}
+	for (const [id, question] of Object.entries(questions)) {
+		const answer: unknown = Reflect.get(answers, id);
+		if (answer === undefined) {
+			throw new JevError(`response did not answer "${id}"`);
+		}
+		if (Reflect.get(answer as object, "type") !== question.type) {
+			throw new JevError(`answer "${id}" is not a ${question.type}`);
 		}
 	}
 	const model = Reflect.get(value, "model");
@@ -260,9 +278,23 @@ function isJevAnswer(value: unknown): value is JevAnswer {
 	if (typeof value !== "object" || value === null) return false;
 	const type: unknown = Reflect.get(value, "type");
 	if (type === "noul") return typeof Reflect.get(value, "noul") === "number";
-	if (type === "choice") return typeof Reflect.get(value, "choice") === "string";
-	if (type === "score") return typeof Reflect.get(value, "score") === "number";
+	if (type === "choice") {
+		return typeof Reflect.get(value, "choice") === "string" && isDistribution(value);
+	}
+	if (type === "score") {
+		return typeof Reflect.get(value, "score") === "number" && isDistribution(value);
+	}
 	return false;
+}
+
+/** Choice and score answers both carry a confidence and a probability map. */
+function isDistribution(value: object): boolean {
+	const probabilities: unknown = Reflect.get(value, "probabilities");
+	return (
+		typeof Reflect.get(value, "confidence") === "number" &&
+		typeof probabilities === "object" &&
+		probabilities !== null
+	);
 }
 
 /** Abort when any source aborts. Local helper: no dependency on AbortSignal.any. */

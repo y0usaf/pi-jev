@@ -322,7 +322,27 @@ function readConfigFile(path: string, warnings: string[]): ParsedConfigFile {
 		out.output = parsedOutput;
 	}
 
+	for (const key of ignoredKeys(parsed, out)) {
+		warnings.push(`${path}: ignored ${key} (unknown key or unusable value)`);
+	}
 	return out;
+}
+
+function ignoredKeys(raw: object, kept: object, prefix = ""): string[] {
+	const ignored: string[] = [];
+	for (const [key, value] of Object.entries(raw)) {
+		const parsed: unknown = Reflect.get(kept, key);
+		if (parsed === undefined) {
+			ignored.push(`${prefix}${key}`);
+		} else if (isPlainObject(value) && isPlainObject(parsed)) {
+			ignored.push(...ignoredKeys(value, parsed, `${prefix}${key}.`));
+		}
+	}
+	return ignored;
+}
+
+function isPlainObject(value: unknown): value is object {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function asToolNames(value: unknown): string[] | undefined {

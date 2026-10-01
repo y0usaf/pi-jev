@@ -75,7 +75,7 @@ Ask one thing per entry, then combine the answers in your own code. TypeSafe [re
 
 ## Configure
 
-`~/.pi/agent/pi-jev.json`, or project-scoped `.pi/pi-jev.json`. Project values win, and a file only overrides the keys it sets.
+`~/.pi/agent/pi-jev.json`, or project-scoped `.pi/pi-jev.json`. Project values win, and a file only overrides the keys it sets. A key the extension does not know, or a value it cannot use, is ignored with a warning when the session starts.
 
 ```json
 {

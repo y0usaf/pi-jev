@@ -35,6 +35,19 @@ import {
 	outputKey,
 	type OutputVerdict,
 } from "./output";
+import {
+	capped,
+	describeRecord,
+	gateRecord,
+	JOURNAL_CAP,
+	JOURNAL_TAIL,
+	newest as newestRecord,
+	outputRecord,
+	recordsFromEntries,
+	recordClock,
+	writeRecord,
+	type JournalRecord,
+} from "./journal";
 
 /**
  * pi-jev - TypeSafe Jev as a decision layer for pi.
@@ -113,8 +126,14 @@ export default function jevExtension(pi: ExtensionAPI): void {
 	const inflight = new Map<string, Promise<GateVerdict | undefined>>();
 	const outputCache = new Map<string, { at: number; verdict: OutputVerdict }>();
 	const outputInflight = new Map<string, Promise<OutputVerdict | undefined>>();
-	let last: { tool: string; verdict: GateVerdict; at: number } | undefined;
-	let lastOutput: { tool: string; verdict: OutputVerdict; at: number } | undefined;
+	/**
+	 * `/jev last` and `/jev output` read these; they are journal records rather
+	 * than live verdicts so a rehydrated session renders the same text as a live
+	 * one. `journal` holds the records written this session (or reloaded from it).
+	 */
+	let last: JournalRecord | undefined;
+	let lastOutput: JournalRecord | undefined;
+	let journal: JournalRecord[] = [];
 	let lastErrorAt = 0;
 	let missingKeyWarned = false;
 
@@ -127,8 +146,28 @@ export default function jevExtension(pi: ExtensionAPI): void {
 		mode = config.gate.mode;
 	}
 
+	/** Persist a record and keep it in memory. Writing must never break a call. */
+	function remember(record: JournalRecord): void {
+		journal = capped([...journal, record]);
+		writeRecord(pi, record);
+	}
+
+	/** Session entries are hand-editable, so a bad read yields an empty journal. */
+	function readJournal(ctx: ExtensionContext): JournalRecord[] {
+		try {
+			return recordsFromEntries(ctx.sessionManager.getEntries());
+		} catch {
+			return [];
+		}
+	}
+
 	pi.on("session_start", async (_event, ctx) => {
 		reload(ctx.cwd);
+		// A reload, resume, or fork rebuilds this closure from nothing, so the
+		// session's own entries are the only record of what already fired.
+		journal = readJournal(ctx);
+		last = newestRecord(journal, "gate");
+		lastOutput = newestRecord(journal, "output");
 		for (const warning of loaded.warnings) {
 			ctx.ui.notify(`pi-jev: ${redact(warning)}`, "warning");
 		}
@@ -157,7 +196,7 @@ export default function jevExtension(pi: ExtensionAPI): void {
 		const verdict = await verdictFor(key, event, ctx);
 		if (!verdict) return;
 
-		last = { tool: event.toolName, verdict, at: Date.now() };
+		last = gateRecord(event.toolName, verdict, Date.now());
 		ctx.ui.setStatus(
 			STATUS_KEY,
 			verdict.flagged
@@ -165,6 +204,8 @@ export default function jevExtension(pi: ExtensionAPI): void {
 				: `jev: clear (${mode})`,
 		);
 		if (!verdict.flagged) return;
+		// A clear call is not journaled: the flag is the record worth keeping.
+		remember(last);
 
 		const reason = `pi-jev: ${summarizeVerdict(verdict)}`;
 		if (mode === "shadow") {
@@ -210,7 +251,8 @@ export default function jevExtension(pi: ExtensionAPI): void {
 		);
 		if (!verdict?.notice) return;
 
-		lastOutput = { tool: event.toolName, verdict, at: Date.now() };
+		lastOutput = outputRecord(event.toolName, verdict, Date.now());
+		remember(lastOutput);
 		ctx.ui.setStatus(STATUS_KEY, `jev: ${verdict.kind} (${event.toolName})`);
 		if (verdict.kind === "leak") {
 			ctx.ui.notify(
@@ -325,7 +367,6 @@ export default function jevExtension(pi: ExtensionAPI): void {
 					toolName: event.toolName,
 					input: event.input,
 					userRequest: lastUserRequest(ctx),
-					maxStateChars: config.maxStateChars,
 					argumentChars: config.gate.argumentChars,
 				}),
 				questions: GATE_QUESTIONS,
@@ -368,7 +409,7 @@ export default function jevExtension(pi: ExtensionAPI): void {
 
 	pi.registerCommand("jev", {
 		description:
-			"TypeSafe Jev: status, mode, on/off, last verdict, last judged output",
+			"TypeSafe Jev: status, mode, on/off, last verdict, last judged output, journal log",
 		handler: async (args, ctx) => {
 			const [sub, value] = args.trim().toLowerCase().split(/\s+/);
 			if (sub === "on" || sub === "off") {
@@ -399,23 +440,36 @@ export default function jevExtension(pi: ExtensionAPI): void {
 				return;
 			}
 			if (sub === "last") {
-				if (!last) {
+				if (last?.kind !== "gate") {
 					ctx.ui.notify("pi-jev: no verdicts yet", "info");
 					return;
 				}
-				ctx.ui.notify(
-					`pi-jev: ${last.tool} - ${summarizeVerdict(last.verdict)} | ${describeAnswers({ model: last.verdict.model, answers: last.verdict.answers })}`,
-					"info",
-				);
+				ctx.ui.notify(`pi-jev: ${describeRecord(last)}`, "info");
 				return;
 			}
 			if (sub === "output") {
-				if (!lastOutput) {
+				if (lastOutput?.kind !== "output") {
 					ctx.ui.notify("pi-jev: no tool output judged yet", "info");
 					return;
 				}
+				ctx.ui.notify(`pi-jev output: ${describeRecord(lastOutput)}`, "info");
+				return;
+			}
+			if (sub === "log") {
+				if (journal.length === 0) {
+					ctx.ui.notify(
+						"pi-jev: journal is empty (nothing flagged yet)",
+						"info",
+					);
+					return;
+				}
+				const shown = journal.slice(-JOURNAL_TAIL);
+				const lines = shown.map(
+					(record) =>
+						`${recordClock(record)} ${record.kind} ${describeRecord(record)}`,
+				);
 				ctx.ui.notify(
-					`pi-jev output: ${lastOutput.tool} - ${lastOutput.verdict.kind} | leak ${lastOutput.verdict.leaksSecret.toFixed(2)} | class ${lastOutput.verdict.failureClass ?? "none"} at ${lastOutput.verdict.classConfidence?.toFixed(2) ?? "n/a"}`,
+					`pi-jev log: ${shown.length} of ${journal.length} kept (cap ${JOURNAL_CAP})\n${lines.join("\n")}`,
 					"info",
 				);
 				return;
@@ -443,7 +497,9 @@ export default function jevExtension(pi: ExtensionAPI): void {
 						signal: ctx.signal,
 					});
 					const verdict = evaluateGate(response, config);
-					last = { tool: "check", verdict, at: Date.now() };
+					// A manual probe, not a field observation, so it is shown but
+					// not journaled: the journal is the record of what actually fired.
+					last = gateRecord("check", verdict, Date.now());
 					ctx.ui.notify(
 						`pi-jev check: ${summarizeVerdict(verdict)} | ${describeAnswers(response)}`,
 						"info",
@@ -463,7 +519,7 @@ export default function jevExtension(pi: ExtensionAPI): void {
 					: "apiKey (inline)"
 				: `missing (${API_KEY_ENV})`;
 			ctx.ui.notify(
-				`pi-jev: ${gateOn ? "on" : "off"}, out ${outputOn ? "on" : "off"}, mode ${mode}, model ${config.model}, key ${key}, judging ${config.gate.tools.join("/")}, out tools ${config.output.tools.join("/")}, cache ${cache.size}/${outputCache.size}`,
+				`pi-jev: ${gateOn ? "on" : "off"}, out ${outputOn ? "on" : "off"}, mode ${mode}, model ${config.model}, key ${key}, judging ${config.gate.tools.join("/")}, out tools ${config.output.tools.join("/")}, cache ${cache.size}/${outputCache.size}, journal ${journal.length}`,
 				"info",
 			);
 		},

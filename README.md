@@ -25,7 +25,7 @@ The extension needs an API key. Without one it loads, says so once, and stays ou
 
 All four go in one request, so a judgement costs one round trip of roughly 300 ms instead of four.
 
-**Shadow mode is the default.** A flagged call produces a notification and a footer status. In enforce mode a flagged call asks you to confirm before it runs. Headless runs (`-p`, RPC) cannot show a prompt, so enforcement falls back to the same warning unless you set `gate.blockWithoutUI`.
+**Shadow mode is the default.** A flagged call produces a notification and a footer status. In enforce mode a flagged call asks you to confirm before it runs. Headless runs (`--print`, `--mode json`) cannot show a prompt, so enforcement falls back to the same warning unless you set `gate.blockWithoutUI`.
 
 **Every error path fails open.** A missing key, a timeout, a 429, or a malformed response produces no verdict and the tool call proceeds. Errors are reported once a minute at most, so a dead endpoint does not fill the transcript.
 
@@ -81,7 +81,6 @@ Ask one thing per entry, then combine the answers in your own code. TypeSafe [re
 {
   "apiKeyFile": "~/keys/typesafe.txt",
   "model": "jev-latest",
-  "maxStateChars": 8000,
   "gate": {
     "enabled": true,
     "mode": "shadow",
@@ -117,7 +116,23 @@ The API key resolves in this order:
 - `/jev mode shadow|enforce` switches gate modes without a reload
 - `/jev last` prints the last gate verdict with all four answers
 - `/jev output` prints the last judged output: leak probability and failure class
+- `/jev log` prints the recent journal: every flagged verdict and leak/advice notice
 - `/jev check <text>` runs the gate questions against text you supply
+
+## The journal
+
+A flagged gate verdict and a leak or failure-class output verdict are appended to
+the session with `pi.appendEntry("jev", ...)`. They are pi custom entries, so they
+never enter the LLM context, and each one renders a verdict that was already
+computed: the journal costs **no Jev requests**. `/jev last`, `/jev output`, and
+`/jev log` read it, so both survive `/reload`, `/resume`, and `/fork` instead of
+being lost with the process.
+
+The last 100 records are kept in memory and rehydrated on load; `/jev log` prints
+the most recent 10. Clean calls are not journaled - a flag is the record worth
+keeping. A record that cannot be parsed is dropped rather than thrown, because
+session files are hand-editable, and a journal write that fails leaves the tool
+call alone: the same fail-open rule as everything else here.
 
 ## What leaves the machine
 
@@ -181,6 +196,7 @@ src/client.ts   the Jev HTTP client: request, retries, timeouts, key redaction
 src/config.ts   config layering and key resolution
 src/gate.ts     the four questions and the verdict rule for pending tool calls
 src/output.ts   the two questions and the advice table for finished tool results
+src/journal.ts  the persisted verdict records: read, write, and cap
 src/index.ts    pi wiring: the tool_call and tool_result handlers, jev_ask, /jev
 ```
 

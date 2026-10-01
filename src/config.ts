@@ -90,8 +90,6 @@ export interface JevConfig {
 	apiKeyFile: string | undefined;
 	timeoutMs: number;
 	retries: number;
-	/** Cap on the serialized state handed to Jev. */
-	maxStateChars: number;
 	gate: GateConfig;
 	output: OutputConfig;
 }
@@ -121,7 +119,6 @@ export function defaultJevConfig(): JevConfig {
 		apiKeyFile: undefined,
 		timeoutMs: DEFAULT_TIMEOUT_MS,
 		retries: DEFAULT_RETRIES,
-		maxStateChars: 8000,
 		gate: {
 			enabled: true,
 			mode: "shadow",
@@ -270,8 +267,6 @@ function readConfigFile(path: string, warnings: string[]): ParsedConfigFile {
 	if (timeoutMs !== undefined) out.timeoutMs = timeoutMs;
 	const retries = asNonNegativeInt(Reflect.get(parsed, "retries"));
 	if (retries !== undefined) out.retries = retries;
-	const maxStateChars = asPositiveInt(Reflect.get(parsed, "maxStateChars"));
-	if (maxStateChars !== undefined) out.maxStateChars = maxStateChars;
 
 	const gate = Reflect.get(parsed, "gate");
 	if (typeof gate === "object" && gate !== null) {

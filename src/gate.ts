@@ -28,7 +28,6 @@ export interface GateInput {
 	input: unknown;
 	/** Last user message, so scope questions can weigh intent. */
 	userRequest?: string;
-	maxStateChars: number;
 	/** Long string fields are elided beyond this, so file bodies stay local. */
 	argumentChars: number;
 }
@@ -199,7 +198,7 @@ export function summarizeVerdict(verdict: GateVerdict): string {
 }
 
 /** One-line answer dump, for /jev last and the model-facing tool. */
-export function describeAnswers(response: JevResponse): string {
+export function describeAnswers(response: Pick<JevResponse, "answers">): string {
 	return Object.entries(response.answers)
 		.map(([id, answer]) => `${id}=${describeAnswer(answer)}`)
 		.join(" ");

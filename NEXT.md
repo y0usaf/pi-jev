@@ -6,38 +6,26 @@ can we add to it?"), from the two read-only surveys in
 surfaces (203 live requests, `/tmp/jev-probe/report2.txt`). Everything here is
 either already measured by that probe or adds no request at all.
 
-Order is the build order. Only the first item is worth starting now; the rest are
-queued behind it.
+## Shipped
 
-## 1. Verdict journal: persist what the extension already decided
+- **Verdict journal and `/jev log`** (#7). Flagged verdicts persist as `jev`
+  custom entries and survive `/reload`, `/resume`, and `/fork`. This is the
+  field data every item below waits on.
+- **Hygiene** (#7). `maxStateChars` is gone, and the README says print/JSON
+  where it said RPC.
+- **Codemode** (0.2.3, 0.3.0). Calls a script makes keep their results; the
+  output judge reads the `codemode` result instead, measured in README
+  `### Under codemode`.
 
-`last` and `lastOutput` (`src/index.ts:116-117`) are in-memory only, so `/jev last`
-loses every flag on `/reload`, `/resume`, or `/fork` — exactly when a record
-matters. Write each **flagged** gate verdict and each leak/advice output verdict
-with `pi.appendEntry("jev", ...)`, rehydrate on `session_start`
-(`src/index.ts:130`), and add `/jev log` beside the existing `/jev last`.
-
-- Hooks: `appendEntry` (not in LLM context) + `session_start`; no new network call,
-  no new question, **+0 Jev requests**.
-- New file `src/journal.ts`, calls at `src/index.ts:160` and `:213`, `/jev log`
-  near `:411`.
-- This is the item that turns the smoke calibration (`README.md:141-169`) into
-  real data: the flags it records are the only ground truth the project will ever
-  get about what fires in the field. Every other candidate that needs calibration
-  gets cheaper once this exists.
-- Fail open: a journal write error must never escape a handler. Filter
-  `customType === "jev"` exactly and read defensively (session files are
-  hand-editable).
-
-## 2. Taint-gated reply leak check (`message_end`)
+## Next: taint-gated reply leak check (`message_end`)
 
 The output judge catches a secret in tool *output* and asks the model not to repeat
-it (`README.md:45`). Nothing checks the reply. Add a `message_end` handler that runs
+it (README, "The output judge"). Nothing checks the reply. Add a `message_end` handler that runs
 the existing, measured `leaks_secret` question against the assistant's own text
 **only when the last judged tool result was classified `leak`**.
 
-- Hook: `message_end`; taint flag set in the existing `tool_result` handler at
-  `src/index.ts:213`. ~40-60 lines, helper modelled on `judgeOutput` (`:257`).
+- Hook: `message_end`; taint flag set in the existing `tool_result` handler.
+  ~40-60 lines, helper modelled on `judgeOutput`.
 - **+0 requests on ordinary turns** — the gate makes it fire only after a leak,
   which the probe says is rare. ~300 ms on those messages only.
 - Ship **off by default** (`output.judgeReplies: false`): the 0.90 threshold was
@@ -46,14 +34,22 @@ the existing, measured `leaks_secret` question against the assistant's own text
 - Clear the taint flag on `agent_settled` so it cannot stick.
 - Honest limit: `message_end` cannot redact, so this is a warning, not a fix.
 
-## 3. Hygiene, before either of the above lands
+## Queued: Jev requests through pi's classifier runtime
 
-- `maxStateChars` is documented (`README.md:78`) and parsed (`src/config.ts:114`)
-  but **never read** — `buildGateState` caps per-string with `argumentChars` only.
-  Delete the field and its README line, or implement it. It cannot stay a lie in a
-  config the README tells you to edit.
-- `README.md:28` says "Headless runs (`-p`, RPC) cannot show a prompt". RPC has a
-  UI (`hasUI` is true there), so the gate *does* prompt in RPC. Say print/JSON.
+pi 0.99 ships a `typesafe` provider and `ctx.modelRegistry.classify()`. It sends
+the same body (`{ model, state, questions }`) to the same endpoint
+(`https://api.typesafe.ai/v1/systemone`), maps `bool` to `noul`, rejects a
+response that skips a question, and retries under a timeout. Moving to it
+deletes most of `src/client.ts`, the `endpoint` knob, and the `configDirName()`
+fallback for hosts before 0.79.7, and lets `model` name Jev on OpenRouter,
+Vercel AI Gateway, OpenCode, or Cloudflare with credentials pi already holds.
+Calibration carries over for `typesafe/jev-latest`: the request is unchanged.
+
+It needs pi 0.99 or later. 0.99.0 shipped 2026-09-29 and issue #1 came from a
+host on 0.74.2, so not yet. Do it as 0.4.0 once older hosts stop turning up in
+issues, with a load-time notice on a host without `modelRegistry.classify`
+rather than a silent fail-open, and change the AGENTS.md "fetch plus types" rule
+with it.
 
 ## Queued behind those
 

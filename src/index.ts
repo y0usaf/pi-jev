@@ -312,6 +312,7 @@ export default function jevExtension(pi: ExtensionAPI): void {
 					input: event.input,
 					output: event.output,
 					isError: event.isError,
+					argumentChars: config.gate.argumentChars,
 					outputChars: config.output.outputChars,
 				}),
 				questions: OUTPUT_QUESTIONS,

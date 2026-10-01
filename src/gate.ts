@@ -116,12 +116,8 @@ export function buildGateState(input: GateInput): JevState {
  * on the path, the shape, and the intent - not the bulk - so long strings are
  * elided here and the file contents stay on the machine.
  */
-function summarizeArguments(value: unknown, maxChars: number, depth = 0): unknown {
-	if (typeof value === "string") {
-		return value.length > maxChars
-			? `${value.slice(0, maxChars)}\u2026[${value.length - maxChars} chars elided]`
-			: value;
-	}
+export function summarizeArguments(value: unknown, maxChars: number, depth = 0): unknown {
+	if (typeof value === "string") return elide(value, maxChars);
 	if (depth > 4 || value === null || typeof value !== "object") return value;
 	if (Array.isArray(value)) {
 		return value.map((item) => summarizeArguments(item, maxChars, depth + 1));
@@ -219,6 +215,12 @@ function stableStringify(value: unknown): string {
 		a < b ? -1 : a > b ? 1 : 0,
 	);
 	return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${stableStringify(v)}`).join(",")}}`;
+}
+
+export function elide(text: string, maxChars: number): string {
+	return text.length > maxChars
+		? `${text.slice(0, maxChars)}\u2026[${text.length - maxChars} chars elided]`
+		: text;
 }
 
 export function truncateText(text: string, maxChars: number): string {

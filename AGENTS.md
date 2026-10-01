@@ -5,7 +5,6 @@ Maintainer rules for this repository.
 ## Layout
 
 - This repository is the canonical source for the published `@y0usaf/pi-jev` npm package.
-- `y0usaf/pi-flake` vendors a copy of `src/` and this README as a bundled pi extension. A change here needs a matching change there, or the two drift.
 
 ## Code
 

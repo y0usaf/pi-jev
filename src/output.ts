@@ -21,6 +21,7 @@ import {
 	type JevState,
 } from "./client";
 import type { JevConfig } from "./config";
+import { elide, summarizeArguments } from "./gate";
 
 export interface OutputInput {
 	cwd: string;
@@ -29,6 +30,7 @@ export interface OutputInput {
 	/** Text of the tool result, already rendered by the tool. */
 	output: string;
 	isError: boolean;
+	argumentChars: number;
 	outputChars: number;
 }
 
@@ -100,8 +102,8 @@ export function buildOutputState(input: OutputInput): JevState {
 		cwd: input.cwd,
 		tool: input.toolName,
 		is_error: input.isError,
-		arguments: summarize(input.input, 400),
-		output: truncate(input.output, input.outputChars),
+		arguments: summarizeArguments(input.input, input.argumentChars),
+		output: elide(input.output, input.outputChars),
 	};
 }
 
@@ -140,24 +142,4 @@ export function evaluateOutput(
 		answers: response.answers,
 		model: response.model,
 	};
-}
-
-/** Same elision rule as the gate: long strings leave as a prefix plus a count. */
-function summarize(value: unknown, maxChars: number, depth = 0): unknown {
-	if (typeof value === "string") return truncate(value, maxChars);
-	if (depth > 3 || value === null || typeof value !== "object") return value;
-	if (Array.isArray(value)) {
-		return value.map((item) => summarize(item, maxChars, depth + 1));
-	}
-	const out: Record<string, unknown> = {};
-	for (const [key, item] of Object.entries(value)) {
-		out[key] = summarize(item, maxChars, depth + 1);
-	}
-	return out;
-}
-
-function truncate(text: string, maxChars: number): string {
-	return text.length > maxChars
-		? `${text.slice(0, maxChars)}\u2026[${text.length - maxChars} chars elided]`
-		: text;
 }

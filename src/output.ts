@@ -130,7 +130,7 @@ export function evaluateOutput(
 			classConfidence >= config.output.minConfidence)
 	) {
 		kind = "advice";
-		notice = `Jev read this as a ${failureClass} failure (confidence ${classConfidence?.toFixed(2) ?? "n/a"}): ${CLASS_ADVICE[failureClass]}.`;
+		notice = `Jev read this failure as ${failureClass} (confidence ${classConfidence?.toFixed(2) ?? "n/a"}): ${CLASS_ADVICE[failureClass]}.`;
 	}
 
 	return {

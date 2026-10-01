@@ -236,6 +236,7 @@ export default function jevExtension(pi: ExtensionAPI): void {
 	pi.on("tool_result", async (event, ctx) => {
 		if (!outputOn || !config.apiKey) return;
 		if (!config.output.tools.includes(event.toolName)) return;
+		if (event.parentToolCallId) return;
 		const text = contentText(event.content);
 		if (!text.trim()) return;
 
@@ -260,7 +261,6 @@ export default function jevExtension(pi: ExtensionAPI): void {
 				"warning",
 			);
 		}
-		if (event.parentToolCallId) return;
 		// The model reads the tool result, so the notice rides with it.
 		return {
 			content: [

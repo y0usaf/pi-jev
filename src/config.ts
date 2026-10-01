@@ -131,7 +131,7 @@ export function defaultJevConfig(): JevConfig {
 		},
 		output: {
 			enabled: true,
-			tools: ["bash"],
+			tools: ["bash", "codemode"],
 			outputChars: 2000,
 			leakThreshold: 0.9,
 			minConfidence: 0.6,

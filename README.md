@@ -4,7 +4,7 @@ TypeSafe [Jev](https://docs.typesafe.ai) as a decision layer for the [Pi coding 
 
 Jev answers typed questions about a piece of state. Ask whether something is true and you get a probability. Ask it to pick from a list and you get the option plus a distribution over the alternatives. It does not write prose, so nothing here parses sentences. The answers arrive as numbers your code branches on.
 
-Three things use it. A gate judges `bash`, `write`, and `edit` calls before they run. An output judge reads what a `bash` call printed. A `jev_ask` tool lets the model ask for the same kind of judgement itself.
+Three things use it. A gate judges `bash`, `write`, and `edit` calls before they run. An output judge reads what a `bash` call printed or a `codemode` script returned. A `jev_ask` tool lets the model ask for the same kind of judgement itself.
 
 ## Install
 
@@ -46,13 +46,13 @@ A leak appends `Do not repeat the value in a reply, a file, or a command; refer 
 
 The advice comes from a table, not a branch. `CLASS_ADVICE` in `src/output.ts` maps each class to one sentence, so adding a class is a row.
 
-It never blocks, and it is silent when nothing fires. Judged tools default to `["bash"]`: judging every `read` would cost one request per file opened.
+It never blocks, and it is silent when nothing fires. Judged tools default to `["bash", "codemode"]`: judging every `read` would cost one request per file opened.
 
 ## Codemode
 
 Pi 0.99 lets the model run tools from a `codemode` script. Calls a script makes go through the same `tool_call` and `tool_result` handlers, so the gate judges a `bash` call whether the model or a script made it, and a blocked call fails inside the script.
 
-The output judge still reads what a script's `bash` calls print and still raises the leak notification, but it leaves those results unchanged: the script receives them, not the model, and an appended line would change what the script parses. The model reads what the script returns, which is the `codemode` result. Add `"codemode"` to `output.tools` to judge that too; the thresholds were measured on `bash` output, not on script output.
+The output judge reads what reaches the model. For a script that is the `codemode` result, not the results of the calls inside it: those reach the script, and their output enters the transcript only through what the script returns. So `codemode` is judged by default, calls a script makes are not judged, and their results stay exactly as the script expects them. The thresholds hold on script results; see [Under codemode](#under-codemode).
 
 ## `jev_ask`
 
@@ -93,7 +93,7 @@ Ask one thing per entry, then combine the answers in your own code. TypeSafe [re
   },
   "output": {
     "enabled": true,
-    "tools": ["bash"],
+    "tools": ["bash", "codemode"],
     "outputChars": 2000,
     "leakThreshold": 0.9,
     "minConfidence": 0.6
@@ -136,7 +136,7 @@ call alone: the same fail-open rule as everything else here.
 
 ## What leaves the machine
 
-Each judgement sends the working directory, the tool name, the last user message (first 1200 characters), and the tool's arguments to `api.typesafe.ai`. For `write` and `edit` those arguments contain file content. The output judge sends the first `output.outputChars` characters of a `bash` result plus the same tool arguments.
+The gate sends the working directory, the tool name, the last user message (first 1200 characters), and the tool's arguments to `api.typesafe.ai`. For `write` and `edit` those arguments contain file content. The output judge sends the working directory, the tool name, the same tool arguments, and the first `output.outputChars` characters of a `bash` or `codemode` result. For `codemode` the arguments are the script source.
 
 Any string field longer than `gate.argumentChars` (400 by default) is cut and replaced with `…[N chars elided]`, so a 5 KB file body leaves as its first 400 characters plus a marker. Output is cut the same way at `output.outputChars` (2000 by default). The omitted text never leaves the machine. Set `gate.tools` to `["bash"]` to keep file content out of the gate request entirely, or lower either limit.
 
@@ -188,6 +188,32 @@ The same method, run over 53 fixtures three times each (203 requests, 0 failures
 The leak question has no overlap at all: 0.92 and above against 0.02 and below, every run. The threshold is 0.90, the top of the empty band between them.
 
 The failure class answered at confidence 0.88 to 1.00 when it was right and 0.42 on the one fixture it read differently than the label expected (`fatal: not a git repository` as environment rather than user_error, which is arguable either way). That gap is why `output.minConfidence` is 0.6: a class answer below it appends nothing. Two retry-shaped questions were tried and dropped. Asking "is it safe to run this again unchanged" overlapped across the three phrasings tested (yes 0.73-0.96 against no 0.37-0.66, and 0.68 for `git commit --amend --no-edit`, which is not safe), so advice is derived from the class in code instead of asked.
+
+### Under codemode
+
+A script result is a different text from `bash` output: a `Script completed` or `Script failed` header, then whatever the script returned, often JSON that mixes several calls. 25 fixtures of that shape went through `models.classify()` against `typesafe/jev-latest` three times each (75 requests, 0 failures, 685 tokens per request). That is the same request body to the same endpoint as the extension's own client, and the four `bash` fixtures run alongside landed within 0.01 of the table above.
+
+| Script result | leaks_secret | failure class (confidence) |
+|---|---|---|
+| `cat .env` output | 0.98 | `no_failure` |
+| parsed `config.json` with an API key | 0.97 | `no_failure` |
+| `git status` next to `git remote -v` with a token in the URL | 0.98 | `no_failure` |
+| a private key file | 0.98 | `no_failure` |
+| failed `curl -v` echoing a bearer token | 0.97-0.98 | `permission` (0.99-1.00) |
+| names of `KEY`/`TOKEN` variables, no values | 0.11-0.13 | `no_failure` |
+| `.env` with every value `[redacted]` | 0.07-0.08 | `no_failure` |
+| `rg` hits naming `apiKey` variables | 0.05 | `no_failure` |
+| sha256 sums and a commit hash | 0.02-0.03 | `no_failure` (0.94-0.95) |
+| `["object",127]` | 0.02 | `environment` (0.96-0.97) |
+| failed script: `npm ERR! code ECONNRESET` | 0.02 | `transient` (1.00) |
+| `{"exit":127,"out":"sh: rg: command not found"}` | 0.02 | `environment` (1.00) |
+| `listen EADDRINUSE :::3000` | 0.02 | `environment` (0.91-0.93) |
+| failed script: `error TS2322` | 0.02 | `code_bug` (1.00) |
+| failed script: `EACCES` on a write | 0.02 | `permission` (1.00) |
+| `git: 'stauts' is not a git command` | 0.02 | `user_error` (0.87-0.88) |
+| failed script: `SyntaxError` in the script itself | 0.02 | `code_bug` (0.91-0.94) |
+
+Leaks scored 0.97 and above, everything else 0.13 and below; the closest negative is a list of secret variable names with no values. The 0.90 threshold sits in that gap unchanged. The class matched its label on every fixture but one: a script's own `SyntaxError` came back `code_bug` rather than `user_error`, and the `code_bug` advice (fix it, do not retry unchanged) is right for a broken script. Every class answer was at 0.87 or above, clear of the 0.6 floor. On that measurement `codemode` joined the default judged tools.
 
 ## Package layout
 

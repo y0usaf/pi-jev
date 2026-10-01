@@ -48,6 +48,12 @@ The advice comes from a table, not a branch. `CLASS_ADVICE` in `src/output.ts` m
 
 It never blocks, and it is silent when nothing fires. Judged tools default to `["bash"]`: judging every `read` would cost one request per file opened.
 
+## Codemode
+
+Pi 0.99 lets the model run tools from a `codemode` script. Calls a script makes go through the same `tool_call` and `tool_result` handlers, so the gate judges a `bash` call whether the model or a script made it, and a blocked call fails inside the script.
+
+The output judge still reads what a script's `bash` calls print and still raises the leak notification, but it leaves those results unchanged: the script receives them, not the model, and an appended line would change what the script parses. The model reads what the script returns, which is the `codemode` result. Add `"codemode"` to `output.tools` to judge that too; the thresholds were measured on `bash` output, not on script output.
+
 ## `jev_ask`
 
 For decisions that should come back typed rather than written:

@@ -218,12 +218,14 @@ export default function jevExtension(pi: ExtensionAPI): void {
 				"warning",
 			);
 		}
+		if (event.parentToolCallId) return;
 		// The model reads the tool result, so the notice rides with it.
 		return {
 			content: [
 				...event.content,
 				{ type: "text" as const, text: `[pi-jev] ${verdict.notice}` },
 			],
+			structuredContent: event.structuredContent,
 		};
 	});
 

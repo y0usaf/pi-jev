@@ -12,6 +12,12 @@ Three things use it. A gate judges `bash`, `write`, and `edit` calls before they
 pi install npm:@y0usaf/pi-jev
 ```
 
+npm still serves 0.2.0 (see `PUBLISHING.md`). Later releases install from their git tag:
+
+```bash
+pi install git:github.com/y0usaf/pi-jev@v0.3.0
+```
+
 The extension needs an API key. Without one it loads, says so once, and stays out of the way.
 
 ## The gate

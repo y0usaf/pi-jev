@@ -31,7 +31,7 @@ And the model gets a `jev_ask` tool, so it can ask Jev things itself.
 pi install git:github.com/y0usaf/pi-jev@v0.3.0
 ```
 
-npm is stuck on 0.2.0. It's a long story, [PUBLISHING.md](PUBLISHING.md) has it.
+npm is stuck on 0.2.0 until a trusted publisher is set up on npmjs.com.
 
 You need a TypeSafe API key in `TYPESAFE_API_KEY` (or see [Configure](#configure)). No key, no problem: it says so once and stays out of the way.
 

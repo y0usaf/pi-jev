@@ -74,7 +74,7 @@ def main() -> int:
         "to token auth and fail with ENEEDAUTH. A 'package not found' here means no "
         "trusted publisher is configured for this package on npmjs.com, or the one "
         "configured does not match this repository and workflow filename. See "
-        "PUBLISHING.md; adding it needs an interactive passkey on npmjs.com."
+        "AGENTS.md; adding it needs an interactive passkey on npmjs.com."
     )
     return 1
 

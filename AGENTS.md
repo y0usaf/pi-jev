@@ -17,11 +17,6 @@ Maintainer rules for this repository.
 ## Publishing
 
 - A GitHub release publishes from `.github/workflows/publish.yml` using trusted publishing (OIDC), so the repo holds no npm token and no OTP is involved.
-- One-time setup, npmjs.com, package settings, Trusted Publisher: user `y0usaf`, repository `pi-jev`, workflow `publish.yml`, environment empty.
-- A local publish before that is configured needs a token with 2FA bypass enabled:
-
-  ```bash
-  npm publish --access public --//registry.npmjs.org/:_authToken="$(cat path/to/token)"
-  ```
+- One-time setup, npmjs.com, package settings, Trusted Publisher: user `y0usaf`, repository `pi-jev`, workflow `publish.yml`, environment empty, allow `npm publish`. It needs a passkey on the account; no token, script or CI job can do it, and npm no longer accepts a local publish with a 2FA-bypass token.
 
 - The package name is scoped (`@y0usaf/pi-jev`) because the npm token is scoped to `@y0usaf`. A bare name cannot be published with it.

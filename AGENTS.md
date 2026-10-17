@@ -12,7 +12,7 @@ Maintainer rules for this repository.
 - Pi-bundled imports (`@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent`, `typebox`) belong in `peerDependencies` with a `"*"` range and must not be bundled.
 - The gate fails open by design. Do not change an error path to block a tool call.
 - Shadow mode is the default. Any change that makes enforcement implicit needs justifying in the README.
-- A threshold change belongs with a measurement in the `## Calibration` table, not with a guess.
+- A threshold change belongs with a measurement in the README's `## Where the numbers came from` tables, not with a guess.
 
 ## Publishing
 

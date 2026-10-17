@@ -20,7 +20,7 @@ either already measured by that probe or adds no request at all.
 ## Next: taint-gated reply leak check (`message_end`)
 
 The output judge catches a secret in tool *output* and asks the model not to repeat
-it (README, "The output judge"). Nothing checks the reply. Add a `message_end` handler that runs
+it (README, top). Nothing checks the reply. Add a `message_end` handler that runs
 the existing, measured `leaks_secret` question against the assistant's own text
 **only when the last judged tool result was classified `leak`**.
 

@@ -17,8 +17,6 @@ import urllib.parse
 import urllib.request
 
 AUDIENCE = "npm:registry.npmjs.org"
-# Mirrors lib/utils/oidc.js in the npm CLI: the GitHub OIDC token is presented
-# as the Authorization bearer to the per-package exchange endpoint.
 EXCHANGE = "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/{}"
 PACKAGE = "@y0usaf/pi-jev"
 
@@ -64,7 +62,6 @@ def main() -> int:
     status, payload = exchange(token)
     print(f"exchange HTTP {status}")
     if status == 200 and isinstance(payload, dict):
-        # Do not print the credential itself.
         print("exchange OK; response fields: " + ", ".join(sorted(payload)))
         print("trusted publisher is configured and usable from this workflow")
         return 0

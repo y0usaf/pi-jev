@@ -123,7 +123,6 @@ export function writeRecord(pi: ExtensionAPI, record: JournalRecord): void {
 	try {
 		pi.appendEntry(JOURNAL_TYPE, record);
 	} catch {
-		// Nothing to do: the journal is an audit trail, not a gate.
 	}
 }
 

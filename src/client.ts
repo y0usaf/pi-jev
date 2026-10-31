@@ -256,7 +256,6 @@ function normalizeResponse(
 	}
 	const model = Reflect.get(value, "model");
 	const usage = Reflect.get(value, "usage");
-	// Invariant: every entry above passed isJevAnswer, so the map is typed.
 	return {
 		model: typeof model === "string" ? model : DEFAULT_MODEL,
 		answers: answers as Record<string, JevAnswer>,

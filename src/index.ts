@@ -163,8 +163,6 @@ export default function jevExtension(pi: ExtensionAPI): void {
 
 	pi.on("session_start", async (_event, ctx) => {
 		reload(ctx.cwd);
-		// A reload, resume, or fork rebuilds this closure from nothing, so the
-		// session's own entries are the only record of what already fired.
 		journal = readJournal(ctx);
 		last = newestRecord(journal, "gate");
 		lastOutput = newestRecord(journal, "output");
@@ -204,7 +202,6 @@ export default function jevExtension(pi: ExtensionAPI): void {
 				: `jev: clear (${mode})`,
 		);
 		if (!verdict.flagged) return;
-		// A clear call is not journaled: the flag is the record worth keeping.
 		remember(last);
 
 		const reason = `pi-jev: ${summarizeVerdict(verdict)}`;
@@ -218,8 +215,6 @@ export default function jevExtension(pi: ExtensionAPI): void {
 
 		if (!ctx.hasUI) {
 			if (config.gate.blockWithoutUI) return { block: true, reason };
-			// No UI means no way to approve a flagged call. Degrade to shadow
-			// rather than deadlocking a headless run on a classifier's opinion.
 			ctx.ui.notify(
 				`jev: ${event.toolName} - ${summarizeVerdict(verdict)} (headless: not blocking; set gate.blockWithoutUI to block)`,
 				"warning",
@@ -261,7 +256,6 @@ export default function jevExtension(pi: ExtensionAPI): void {
 				"warning",
 			);
 		}
-		// The model reads the tool result, so the notice rides with it.
 		return {
 			content: [
 				...event.content,
@@ -498,8 +492,6 @@ export default function jevExtension(pi: ExtensionAPI): void {
 						signal: ctx.signal,
 					});
 					const verdict = evaluateGate(response, config);
-					// A manual probe, not a field observation, so it is shown but
-					// not journaled: the journal is the record of what actually fired.
 					last = gateRecord("check", verdict, Date.now());
 					ctx.ui.notify(
 						`pi-jev check: ${summarizeVerdict(verdict)} | ${describeAnswers(response)}`,

@@ -230,7 +230,6 @@ function readConfigFile(path: string, warnings: string[]): ParsedConfigFile {
 	try {
 		raw = readFileSync(path, "utf8");
 	} catch (error) {
-		// Missing file is the normal case; anything else is worth reporting.
 		if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
 			warnings.push(
 				`${path}: ${error instanceof Error ? error.message : String(error)}`,
